@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Record Management System</title>
+
+<!-- SheetJS: enables Excel (.xlsx, .xls) and CSV import/export -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+* { box-sizing: border-box; font-family: Arial, sans-serif; }
+body { margin: 0; padding: 20px; background: #00dada; }
+.container { width: 100%; max-width: 1100px; margin: auto; }
+h2 { text-align: center; color: #003d50; margin-bottom: 25px; }
+.form-group {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+label { background: #eee; padding: 12px; font-size: 20px; border: 1px solid #aaa; }
+input[type="text"], textarea {
+    width: 100%; padding: 12px; font-size: 18px;
+    border: 2px solid #aaa; outline: none; background: white;
+}
+textarea { height: 120px; resize: vertical; }
+input:focus, textarea:focus { border-color: #007bff; }
+.buttons {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-top: 30px;
+}
+button {
+    padding: 15px 10px; font-size: 17px; cursor: pointer;
+    border: 2px solid #aaa; border-radius: 4px;
+    background: #eee; transition: .2s;
+}
+button:hover { background: #d2f5ff; border-color: #007bff; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.btn-add { background: #d4f8d4; }
+.btn-edit { background: #fff0b3; }
+.btn-delete { background: #ffcaca; }
+.btn-export { background: #bdeaff; }
+.btn-import { background: #c8b5ff; }
+.table-container { margin-top: 30px; overflow-x: auto; background: white; border: 2px solid #999; }
+table { width: 100%; border-collapse: collapse; min-width: 500px; }
+th, td { padding: 13px; text-align: left; border: 1px solid #ccc; font-size: 16px; }
+th { background: #006b80; color: white; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: #d9f5ff; }
+tbody tr.selected { background: #a7e7ff; }
+.status {
+    margin-top: 20px; padding: 12px; background: #e8ffff;
+    border: 1px solid #009999; color: #004b4b;
+    text-align: center; font-weight: bold; overflow-wrap: anywhere;
+}
+.record-count { margin-top: 15px; text-align: right; font-weight: bold; color: #003d50; }
+@media (max-width: 750px) {
+    .buttons { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 500px) {
+    body { padding: 12px; }
+    .form-group { grid-template-columns: 1fr; gap: 5px; }
+    .buttons { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    button { font-size: 15px; }
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+    <h2>RECORD MANAGEMENT SYSTEM</h2>
+
+    <div class="form-group">
+        <label for="txtName">Name</label>
+        <input type="text" id="txtName" placeholder="Enter Name" autocomplete="name">
+    </div>
+
+    <div class="form-group">
+        <label for="txtAddress">Address</label>
+        <textarea id="txtAddress" placeholder="Enter Address"></textarea>
+    </div>
+
+    <div class="buttons">
+        <button class="btn-add" onclick="addRecord()">Add</button>
+        <button class="btn-edit" onclick="editRecord()" id="btnEdit" disabled>Edit</button>
+        <button class="btn-delete" onclick="deleteRecord()" id="btnDelete" disabled>Delete</button>
+        <button class="btn-export" onclick="exportExcel()">Export to Excel</button>
+        <button class="btn-import" onclick="importData()">Import Data</button>
+    </div>
+
+    <input type="file" id="fileImport" accept=".xlsx,.xls,.csv" hidden>
+
+    <div class="status" id="lblStatus" role="status">Ready</div>
+    <div class="record-count" id="lblCount">Total Records: 0</div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr><th width="60">No.</th><th>Name</th><th>Address</th></tr>
+            </thead>
+            <tbody id="recordList"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+"use strict";
+
+const STORAGE_KEY = "MyRecords";
+let records = [];
+let selectedID = null;
+
+function loadRecords() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+        records = Array.isArray(saved) ? saved : [];
+    } catch (error) {
+        records = [];
+        setStatus("Could not read saved records. Starting with an empty list.");
+    }
+    displayRecords();
+}
+
+function saveRecords() {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+        return true;
+    } catch (error) {
+        alert("Could not save records in this browser. Storage may be full or disabled.");
+        return false;
+    }
+}
+
+function displayRecords() {
+    const table = document.getElementById("recordList");
+    table.replaceChildren();
+
+    records.forEach((record, index) => {
+        const row = document.createElement("tr");
+        if (record.id === selectedID) row.classList.add("selected");
+
+        const no = document.createElement("td");
+        no.textContent = index + 1;
+
+        const name = document.createElement("td");
+        name.textContent = record.name;
+
+        const address = document.createElement("td");
+        address.textContent = record.address;
+
+        row.append(no, name, address);
+        row.addEventListener("click", () => selectRecord(record.id));
+        table.appendChild(row);
+    });
+
+    document.getElementById("lblCount").textContent =
+        "Total Records: " + records.length;
+    updateButtons();
+}
+
+function selectRecord(id) {
+    const record = records.find(item => item.id === id);
+    if (!record) return;
+
+    selectedID = id;
+    document.getElementById("txtName").value = record.name;
+    document.getElementById("txtAddress").value = record.address;
+    setStatus("Selected: " + record.name);
+    displayRecords();
+}
+
+function updateButtons() {
+    const selected = selectedID !== null;
+    document.getElementById("btnEdit").disabled = !selected;
+    document.getElementById("btnDelete").disabled = !selected;
+}
+
+function clearFields() {
+    document.getElementById("txtName").value = "";
+    document.getElementById("txtAddress").value = "";
+    selectedID = null;
+    displayRecords();
+    document.getElementById("txtName").focus();
+}
+
+function setStatus(message) {
+    document.getElementById("lblStatus").textContent = message;
+}
+
+function addRecord() {
+    const name = document.getElementById("txtName").value.trim();
+    const address = document.getElementById("txtAddress").value.trim();
+
+    if (!name) {
+        alert("Please enter Name.");
+        document.getElementById("txtName").focus();
+        return;
+    }
+    if (!address) {
+        alert("Please enter Address.");
+        document.getElementById("txtAddress").focus();
+        return;
+    }
+
+    records.push({
+        id: createID(),
+        name: name,
+        address: address
+    });
+
+    if (!saveRecords()) {
+        records.pop();
+        return;
+    }
+
+    clearFields();
+    setStatus("Record successfully added!");
+}
+
+function editRecord() {
+    if (selectedID === null) {
+        alert("Please select a record to edit.");
+        return;
+    }
+
+    const name = document.getElementById("txtName").value.trim();
+    const address = document.getElementById("txtAddress").value.trim();
+
+    if (!name) {
+        alert("Please enter Name.");
+        document.getElementById("txtName").focus();
+        return;
+    }
+    if (!address) {
+        alert("Please enter Address.");
+        document.getElementById("txtAddress").focus();
+        return;
+    }
+
+    const index = records.findIndex(item => item.id === selectedID);
+    if (index === -1) return;
+
+    const oldRecord = { ...records[index] };
+    records[index].name = name;
+    records[index].address = address;
+
+    if (!saveRecords()) {
+        records[index] = oldRecord;
+        return;
+    }
+
+    clearFields();
+    setStatus("Record successfully updated!");
+}
+
+function deleteRecord() {
+    if (selectedID === null) {
+        alert("Please select a record to delete.");
+        return;
+    }
+
+    const record = records.find(item => item.id === selectedID);
+    if (!record) return;
+
+    if (!confirm("Are you sure you want to delete:\n\n" + record.name + "?")) {
+        return;
+    }
+
+    const previousRecords = records;
+    records = records.filter(item => item.id !== selectedID);
+
+    if (!saveRecords()) {
+        records = previousRecords;
+        return;
+    }
+
+    clearFields();
+    setStatus("Record successfully deleted!");
+}
+
+function createID() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+function getExcelLibrary() {
+    if (typeof XLSX === "undefined") {
+        alert("The Excel library could not be loaded. Check your internet connection and reload this page.");
+        return false;
+    }
+    return true;
+}
+
+function exportExcel() {
+    if (records.length === 0) {
+        alert("No records available to export.");
+        return;
+    }
+    if (!getExcelLibrary()) return;
+
+    const excelData = records.map((record, index) => ({
+        "No.": index + 1,
+        "Name": record.name,
+        "Address": record.address
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    worksheet["!cols"] = [{ wch: 8 }, { wch: 30 }, { wch: 50 }];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Records");
+    XLSX.writeFile(workbook, "MyRecords.xlsx");
+
+    setStatus("Excel file successfully exported!");
+}
+
+function importData() {
+    if (!getExcelLibrary()) return;
+    const fileInput = document.getElementById("fileImport");
+    fileInput.value = "";
+    fileInput.click();
+}
+
+function processImport(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    if (!getExcelLibrary()) {
+        event.target.value = "";
+        return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: "array" });
+            const firstSheetName = workbook.SheetNames[0];
+
+            if (!firstSheetName) {
+                alert("The selected file does not contain a worksheet.");
+                return;
+            }
+
+            const worksheet = workbook.Sheets[firstSheetName];
+            const importedData = XLSX.utils.sheet_to_json(worksheet, {
+                defval: "",
+                raw: false
+            });
+
+            if (importedData.length === 0) {
+                alert("No records found in the Excel file.");
+                return;
+            }
+
+            const headers = Object.keys(importedData[0]);
+            const nameColumn = headers.find(
+                header => header.trim().toLowerCase() === "name"
+            );
+            const addressColumn = headers.find(
+                header => header.trim().toLowerCase() === "address"
+            );
+
+            if (!nameColumn || !addressColumn) {
+                alert('Invalid Excel format. The first row must contain "Name" and "Address" column headings.');
+                return;
+            }
+
+            const validRecords = importedData
+                .map(row => ({
+                    name: String(row[nameColumn] ?? "").trim(),
+                    address: String(row[addressColumn] ?? "").trim()
+                }))
+                .filter(row => row.name !== "" && row.address !== "");
+
+            if (validRecords.length === 0) {
+                alert("No valid records to import. Each record must have a Name and Address.");
+                return;
+            }
+
+            if (!confirm(
+                "Import " + validRecords.length + " records?\n\n" +
+                "Existing records will be retained."
+            )) {
+                return;
+            }
+
+            const importedWithIDs = validRecords.map(row => ({
+                id: createID(),
+                name: row.name,
+                address: row.address
+            }));
+
+            const previousRecords = records;
+            records = records.concat(importedWithIDs);
+
+            if (!saveRecords()) {
+                records = previousRecords;
+                return;
+            }
+
+            clearFields();
+            setStatus(importedWithIDs.length + " records successfully imported!");
+            alert("Import Successful!\n\nTotal Imported: " + importedWithIDs.length);
+        } catch (error) {
+            console.error(error);
+            alert("Unable to import the selected file. Please check that it is a valid Excel or CSV file.");
+        } finally {
+            event.target.value = "";
+        }
+    };
+
+    reader.onerror = function() {
+        alert("Error reading the selected file.");
+        event.target.value = "";
+    };
+
+    reader.readAsArrayBuffer(file);
+}
+
+document.getElementById("fileImport").addEventListener("change", processImport);
+
+// Start application
+loadRecords();
+</script>
+</body>
+</html>
